@@ -1,65 +1,65 @@
-import os
-import sys
-from google import genai
-from dotenv import load_dotenv
+import streamlit as st
+import google.genai as genai  # Robust import to avoid namespace issues
+from google.genai import types
 
-# 1. Setup
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
+# 1. PAGE SETUP
+st.set_page_config(page_title="Python Pete", page_icon="🐍")
+st.title("🐍 Python Pete: AI Navigator")
+st.markdown("---")
 
-if not api_key:
-    print("❌ ERROR: Key missing in .env")
-    sys.exit()
+# 2. SECURE API KEY (Uses Streamlit Secrets)
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    st.error("❌ Missing API Key! Go to Settings > Secrets and add GEMINI_API_KEY.")
+    st.stop()
 
-# 2. Initialize the 2026 Client
-client = genai.Client(api_key=api_key.strip())
+# 3. INITIALIZE CLIENT
+client = genai.Client(api_key=api_key)
 
-print("🔍 Pete is scanning your specific permissions...")
-
-# 3. THE DISCOVERY (Fixed for Library 1.57.0)
-active_model = None
-try:
-    # We look for 'generateContent' inside the new 'supported_actions' list
-    for m in client.models.list():
-        if hasattr(m, 'supported_actions') and 'generateContent' in m.supported_actions:
-            # We prefer 'flash' models because they are usually free
-            if "flash" in m.name.lower():
-                active_model = m.name
-                break
-    
-    # If no 'flash' found, grab the first one that supports generating content
-    if not active_model:
+# 4. DISCOVERY ENGINE (Self-Healing)
+@st.cache_resource
+def get_working_model():
+    try:
+        # Scans your account for permitted models
         for m in client.models.list():
             if hasattr(m, 'supported_actions') and 'generateContent' in m.supported_actions:
-                active_model = m.name
-                break
-except Exception as e:
-    print(f"❌ Scanner failed: {e}")
-    sys.exit()
+                if "flash" in m.name.lower():
+                    return m.name
+        return "gemini-1.5-flash"  # Fallback
+    except Exception:
+        return "gemini-1.5-flash"
 
-if not active_model:
-    print("❌ No usable models found. Check your API key at aistudio.google.com")
-    sys.exit()
+active_model = get_working_model()
 
-print(f"✅ Found working model for you: {active_model}")
+# 5. CHAT HISTORY
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# 4. Start the Chat
-try:
-    chat = client.chats.create(model=active_model)
-    print("--- Python Pete is Online! ---")
-except Exception as e:
-    print(f"❌ Connection error: {e}")
-    sys.exit()
+# Display previous messages
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-# 5. Simple Chat Loop
-while True:
-    user_msg = input("\nYou (Dona): ")
-    if user_msg.lower() in ["quit", "exit", "bye"]:
-        print("Pete: Sss-see you later! 🐍")
-        break
-    
-    try:
-        response = chat.send_message(user_msg)
-        print(f"Pete: {response.text}")
-    except Exception as e:
-        print(f"❌ Pete had a hiccup: {e}")
+# 6. CHAT INPUT
+if prompt := st.chat_input("Sss-say something to Pete..."):
+    # User message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Pete's Response
+    with st.chat_message("assistant"):
+        try:
+            response = client.models.generate_content(
+                model=active_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction="You are Pete, a snake-like AI navigator. Use snake puns and be helpful."
+                )
+            )
+            pete_reply = response.text
+            st.markdown(pete_reply)
+            st.session_state.messages.append({"role": "assistant", "content": pete_reply})
+        except Exception as e:
+            st.error(f"Pete had a hiccup: {e}")
